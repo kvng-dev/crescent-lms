@@ -7,8 +7,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { EditCourseForm } from "../_component/edit-form";
-import CourseStructure from "../_component/course-structure";
+import { EditCourseForm } from "./_component/edit-form";
+import CourseStructure from "./_component/course-structure";
 
 type Params = Promise<{ courseId: string }>;
 export default async function EditRoute({ params }: { params: Params }) {

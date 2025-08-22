@@ -6,6 +6,7 @@ import { Collapsible, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import {
   DndContext,
+  DragEndEvent,
   DraggableSyntheticListeners,
   KeyboardSensor,
   PointerSensor,
@@ -25,13 +26,17 @@ import { CollapsibleContent } from "@radix-ui/react-collapsible";
 import {
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   FileText,
   GripVertical,
-  Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
+import { toast } from "sonner";
+import { reOrderChapter, reOrderedLessons } from "../actions";
+import { NewChapterModal } from "../new-chapter-modal";
+import { NewLessonModal } from "../new-lesson-modal";
+import { DeleteLesson } from "./delete-lesson";
+import { DeleteChapter } from "./delete-chapter";
 interface Props {
   data: AdminGetCourseType;
 }
@@ -59,6 +64,25 @@ const CourseStructure = ({ data }: Props) => {
     })) || [];
   const [items, setItems] = useState(initialItems);
 
+  console.log(items);
+
+  useEffect(() => {
+    setItems((prev) => {
+      const updatedItems =
+        data.chapters.map((chapter) => ({
+          id: chapter.id,
+          title: chapter.title,
+          order: chapter.position,
+          isOpen: prev.find((item) => item.id === chapter.id)?.isOpen ?? true,
+          lessons: chapter.lessons.map((lesson) => ({
+            id: lesson.id,
+            title: lesson.title,
+            order: lesson.position,
+          })),
+        })) || [];
+      return updatedItems;
+    });
+  }, [data]);
   function SortableItem({ children, id, className, data }: SortableItemProps) {
     const {
       attributes,
@@ -85,16 +109,139 @@ const CourseStructure = ({ data }: Props) => {
       </div>
     );
   }
-  function handleDragEnd(event) {
+  function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
 
-    if (active.id !== over.id) {
-      setItems((items) => {
-        const oldIndex = items.indexOf(active.id);
-        const newIndex = items.indexOf(over.id);
+    if (!over || active.id === over.id) return;
 
-        return arrayMove(items, oldIndex, newIndex);
-      });
+    const activeId = active.id;
+    const overId = over.id;
+    const activeType = active.data.current?.type as "chapter" | "lesson";
+    const overType = over.data.current?.type as "chapter" | "lesson";
+    const courseId = data.id;
+
+    if (activeType === "chapter") {
+      let targetChapterId = null;
+
+      if (overType === "chapter") {
+        targetChapterId = overId;
+      } else if (overType === "lesson") {
+        targetChapterId = over.data.current?.chapterId ?? null;
+      }
+
+      if (!targetChapterId) {
+        toast.error("Could not determine the chapter for reordering");
+      }
+      const oldIndex = items.findIndex((item) => item.id === activeId);
+      const newIndex = items.findIndex((item) => item.id === targetChapterId);
+
+      if (oldIndex === -1 || newIndex === -1) {
+        toast.error("Could not find chapter old/new index for reordering");
+        return;
+      }
+      const reOrederedLocalChapter = arrayMove(items, oldIndex, newIndex);
+      const updateChapterForState = reOrederedLocalChapter.map(
+        (chapter, index) => ({
+          ...chapter,
+          order: index + 1,
+        })
+      );
+
+      const prevItems = [...items];
+      setItems(updateChapterForState);
+      if (courseId) {
+        const chaptersToUpdate = updateChapterForState.map((chapter) => ({
+          id: chapter.id,
+          position: chapter.order,
+        }));
+        const reorderPromise = () => reOrderChapter(courseId, chaptersToUpdate);
+        toast.promise(reorderPromise(), {
+          loading: "Reordering chapters...",
+          success: (result) => {
+            if (result.status === "success") return result.message;
+          },
+          error: () => {
+            setItems(prevItems);
+            return "Failed to reorder chapters";
+          },
+        });
+        return;
+      }
+    }
+    if (activeType === "lesson" && overType === "lesson") {
+      const chapterId = active.data.current?.chapterId;
+      const overChapterId = over.data.current?.chapterId;
+
+      if (!chapterId || chapterId !== overChapterId) {
+        toast.error(
+          "Lesson move between different chapters or invalid chapter ID is not allowed"
+        );
+        return;
+      }
+
+      const chapterIndex = items.findIndex(
+        (chapter) => chapter.id === chapterId
+      );
+      if (chapterIndex === -1) {
+        toast.error("Could not find chapter for lesson");
+        return;
+      }
+      const chapterToUpdate = items[chapterIndex];
+
+      const oldLessonIndex = chapterToUpdate.lessons.findIndex(
+        (lesson) => lesson.id === activeId
+      );
+
+      const newLessonIndex = chapterToUpdate.lessons.findIndex(
+        (lesson) => lesson.id === overId
+      );
+
+      if (oldLessonIndex === -1 || newLessonIndex === -1) {
+        toast.error("Could not find lesson for reordering");
+        return;
+      }
+
+      const reorderedLessons = arrayMove(
+        chapterToUpdate.lessons,
+        oldLessonIndex,
+        newLessonIndex
+      );
+
+      const updatedLessonForState = reorderedLessons.map((lesson, index) => ({
+        ...lesson,
+        order: index + 1,
+      }));
+
+      const newItems = [...items];
+      newItems[chapterIndex] = {
+        ...chapterToUpdate,
+        lessons: updatedLessonForState,
+      };
+
+      const prevItems = [...items];
+      setItems(newItems);
+
+      if (courseId) {
+        const lessonsToUpdate = updatedLessonForState.map((lesson) => ({
+          id: lesson.id,
+          position: lesson.order,
+        }));
+
+        const reorderLessonPromise = () =>
+          reOrderedLessons(chapterId, lessonsToUpdate, courseId);
+
+        toast.promise(reorderLessonPromise(), {
+          loading: "Reordering Lessons...",
+          success: (result) => {
+            if (result.status === "success") return result.message;
+          },
+          error: () => {
+            setItems(prevItems);
+            return "Failed to reorder lessons";
+          },
+        });
+      }
+      return;
     }
   }
 
@@ -123,8 +270,9 @@ const CourseStructure = ({ data }: Props) => {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between border-b border-border">
           <CardTitle>Chapters</CardTitle>
+          <NewChapterModal courseId={data.id} />
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-8">
           <SortableContext items={items} strategy={verticalListSortingStrategy}>
             {items.map((item) => (
               <SortableItem
@@ -164,10 +312,7 @@ const CourseStructure = ({ data }: Props) => {
                             {item.title}
                           </p>
                         </div>
-
-                        <Button size={"icon"} variant={"outline"}>
-                          <Trash2 className="size-4" />
-                        </Button>
+                        <DeleteChapter chapterId={item.id} courseId={data.id} />
                       </div>
                       <CollapsibleContent>
                         <div className="p-1">
@@ -183,7 +328,7 @@ const CourseStructure = ({ data }: Props) => {
                               >
                                 {(lessonListeners) => (
                                   <div className="hover:bg-accent flex items-center justify-between p-2 rounded-sm">
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 text-sm">
                                       <Button
                                         variant={"ghost"}
                                         size={"icon"}
@@ -193,23 +338,26 @@ const CourseStructure = ({ data }: Props) => {
                                       </Button>
                                       <FileText className="size-4" />
                                       <Link
-                                        href={`/admin/courses/${data.id}/${lesson.id}`}
+                                        href={`/admin/courses/${data.id}/${item.id}/${lesson.id}`}
                                       >
                                         {lesson.title}
                                       </Link>
                                     </div>
-                                    <Button size={"icon"} variant={"outline"}>
-                                      <Trash2 className="size-4" />
-                                    </Button>
+                                    <DeleteLesson
+                                      chapterId={item.id}
+                                      courseId={data.id}
+                                      lessonId={lesson.id}
+                                    />
                                   </div>
                                 )}
                               </SortableItem>
                             ))}
                           </SortableContext>
-                          <div className="p-2 flex justify-center">
-                            <Button className="w-1/2" variant={"outline"}>
-                              Create New Lesson
-                            </Button>
+                          <div className="p-2">
+                            <NewLessonModal
+                              chapterId={item.id}
+                              courseId={data.id}
+                            />
                           </div>
                         </div>
                       </CollapsibleContent>

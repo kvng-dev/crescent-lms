@@ -35,7 +35,7 @@ import { toast } from "sonner";
 import { tryCatch } from "@/hooks/try-catch";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import { editCourse } from "../edit/actions";
+import { editCourse } from "../actions";
 import { AdminGetCourseType } from "@/app/data/admin/admin-get-course";
 
 interface Props {
@@ -161,7 +161,11 @@ export function EditCourseForm({ data }: Props) {
               <FormLabel>Thumbnail Image</FormLabel>
               <FormControl>
                 {/* <Input placeholder="thumbnail url" {...field} /> */}
-                <Uploader onChange={field.onChange} value={field.value} />
+                <Uploader
+                  fileTypeAccepted="image"
+                  onChange={field.onChange}
+                  value={field.value}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
